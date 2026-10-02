@@ -112,12 +112,16 @@ def git(*args, entree=None, env=None, octets=False):
 
 
 def lit_branche(branche, fichier):
-    """OCTETS bruts du fichier sur la branche distante (jamais decodes ici : un battement en
-    UTF-16 doit finir ILLISIBLE, pas absent), ou None (branche ou fichier absent, reseau)."""
-    if git("fetch", "--quiet", "--depth=1", "origin", branche).returncode != 0:
-        return None
+    """(statut, octets). OK : octets bruts (jamais decodes ici : un battement en UTF-16 doit finir
+    ILLISIBLE, pas absent) ; ABSENT : la branche n'existe pas ; ECHEC : reseau ou lecture ratee
+    (ne JAMAIS confondre avec ABSENT : on remettrait la borne d'envoi a zero)."""
+    rc = git("ls-remote", "--exit-code", "origin", "refs/heads/" + branche).returncode
+    if rc == 2:
+        return "ABSENT", None
+    if rc != 0 or git("fetch", "--quiet", "--depth=1", "origin", branche).returncode != 0:
+        return "ECHEC", None
     r = git("show", "FETCH_HEAD:" + fichier, octets=True)
-    return r.stdout if r.returncode == 0 else None
+    return ("OK", r.stdout) if r.returncode == 0 else ("ECHEC", None)
 
 
 def publie(fichiers, t):
@@ -175,14 +179,18 @@ def main(argv=None):
         print("OBSERVATION_REFUS catalogue illisible : %s" % e)
         return 2
     miroir = tempfile.mkdtemp()
-    battement = lit_branche("battement", "battement.json")
+    statut, battement = lit_branche("battement", "battement.json")
+    statut_e, envoi_brut = lit_branche("preuve", "envoi.json")
+    if "ECHEC" in (statut, statut_e):
+        print("LECTURE_ECHEC battement=%s preuve=%s : rien publie, aucun envoi" % (statut, statut_e))
+        return 3
     if battement is not None:
         with io.open(os.path.join(miroir, "battement.json"), "wb") as f:
             f.write(battement)
     rec = observe(miroir, t, cat)
     try:
-        avant = _nombre_fini(json.loads((lit_branche("preuve", "envoi.json") or b"{}")
-                                        .decode("utf-8")).get("dernier_envoi_ts")) or 0.0
+        avant = _nombre_fini(json.loads((envoi_brut or b"{}").decode("utf-8"))
+                             .get("dernier_envoi_ts")) or 0.0
     except (ValueError, AttributeError):  # UnicodeDecodeError est une ValueError
         avant = 0.0
     envoyer, etat = decide_envoi(rec, avant, t)
@@ -193,7 +201,8 @@ def main(argv=None):
     muets = sorted(n for n, d in rec["sources"].items() if d.get("alerte"))
     print("OBSERVATION hote=%s ts=%s alerte=%s sources_en_alerte=%s envoi=%s"
           % (rec["hote"], rec["ts"], rec["alerte"], ",".join(muets) or "-", resultat))
-    return 0
+    # envoi rate : le job echoue, GitHub previent le proprietaire par courriel (escalade)
+    return 4 if str(resultat).startswith("ECHEC") else 0
 
 
 if __name__ == "__main__":
