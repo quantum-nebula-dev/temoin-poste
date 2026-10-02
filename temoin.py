@@ -104,16 +104,19 @@ def texte_alerte(rec):
             "\nIl est peut-être éteint, figé ou sans réseau. Prochaine alerte dans une heure au plus tôt.")
 
 
-def git(*args, entree=None, env=None):
+def git(*args, entree=None, env=None, octets=False):
+    if octets:
+        return subprocess.run(["git"] + list(args), capture_output=True, timeout=120, env=env)
     return subprocess.run(["git"] + list(args), input=entree, capture_output=True, text=True,
-                          encoding="utf-8", timeout=120, env=env)
+                          encoding="utf-8", errors="replace", timeout=120, env=env)
 
 
 def lit_branche(branche, fichier):
-    """Texte du fichier sur la branche distante, ou None (branche ou fichier absent, reseau)."""
+    """OCTETS bruts du fichier sur la branche distante (jamais decodes ici : un battement en
+    UTF-16 doit finir ILLISIBLE, pas absent), ou None (branche ou fichier absent, reseau)."""
     if git("fetch", "--quiet", "--depth=1", "origin", branche).returncode != 0:
         return None
-    r = git("show", "FETCH_HEAD:" + fichier)
+    r = git("show", "FETCH_HEAD:" + fichier, octets=True)
     return r.stdout if r.returncode == 0 else None
 
 
@@ -174,13 +177,13 @@ def main(argv=None):
     miroir = tempfile.mkdtemp()
     battement = lit_branche("battement", "battement.json")
     if battement is not None:
-        with io.open(os.path.join(miroir, "battement.json"), "w", encoding="utf-8") as f:
+        with io.open(os.path.join(miroir, "battement.json"), "wb") as f:
             f.write(battement)
     rec = observe(miroir, t, cat)
     try:
-        avant = _nombre_fini(json.loads(lit_branche("preuve", "envoi.json") or "{}")
-                             .get("dernier_envoi_ts")) or 0.0
-    except (ValueError, AttributeError):
+        avant = _nombre_fini(json.loads((lit_branche("preuve", "envoi.json") or b"{}")
+                                        .decode("utf-8")).get("dernier_envoi_ts")) or 0.0
+    except (ValueError, AttributeError):  # UnicodeDecodeError est une ValueError
         avant = 0.0
     envoyer, etat = decide_envoi(rec, avant, t)
     if not publie({"preuve.json": rec, "envoi.json": etat}, t):
