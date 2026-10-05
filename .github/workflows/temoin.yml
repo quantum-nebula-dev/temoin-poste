@@ -1,15 +1,34 @@
 name: temoin
+# Cadence (INFRA-293, 06/10/2026) : GitHub ne tient pas le cron (runs espaces de 3 a 9 h).
+# Chaque run observe puis relance le suivant par workflow_dispatch (permis au jeton du run) ;
+# le maillon `chaine=oui` attend la minuterie de l'environnement `cadence` (9 min, sans runner).
+# Le cron reste comme relanceur de secours. Arret : desactiver le workflow.
 on:
   schedule:
     - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
+    inputs:
+      chaine:
+        description: "oui = maillon de la chaine (attend la minuterie de l'environnement cadence)"
+        required: false
+        default: "non"
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: temoin
   cancel-in-progress: false
 jobs:
+  attendre:
+    if: github.event_name == 'workflow_dispatch' && inputs.chaine == 'oui'
+    runs-on: ubuntu-latest
+    environment: cadence
+    timeout-minutes: 2
+    steps:
+      - run: echo "minuterie de l'environnement cadence ecoulee"
   observer:
+    needs: attendre
+    if: always() && (needs.attendre.result == 'success' || needs.attendre.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -19,3 +38,18 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
         run: python3 temoin.py
+  relancer:
+    needs: [attendre, observer]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: maillon suivant
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in 1 2 3; do
+            gh workflow run temoin.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f chaine=oui && exit 0
+            sleep 20
+          done
+          exit 1
