@@ -1,0 +1,15 @@
+{
+ "alerte": false,
+ "hote": "runnervmmprz5",
+ "observateur": "temoin.py",
+ "sources": {
+  "poste": {
+   "age_s": 247.1,
+   "alerte": null,
+   "motif": "battement frais",
+   "silence_s": 1200.0
+  }
+ },
+ "ts": "2026-10-10T22:32:29.769376+00:00",
+ "ts_epoch": 1791671549.7693756
+}
